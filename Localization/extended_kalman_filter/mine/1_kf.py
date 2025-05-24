@@ -37,7 +37,7 @@ def kf_1d(zs, x0=0.0, P0=1.0, Q=0.1, R=1.0):
 if __name__ == "__main__":
     np.random.seed(42)
     steps      = int(SIM_TIME / DT)
-    true_pos   = 24.0                               # “真值”保持常数
+    true_pos   = 20.0                               # “真值”保持常数
     measurements = true_pos + np.random.randn(steps) * GPS_STD  # 带噪观测
 
     estimates = kf_1d(measurements, x0=0.0, P0=1.0, Q=Q, R=R)
