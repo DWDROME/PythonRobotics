@@ -9,9 +9,7 @@
 4. **Extensible state** – 可选的刻度因子、IMU-GNSS 杠杆臂
 5. **Rich plots** – 3D 轨迹、位置误差、速度误差
 
-
 python ESKF.py --scenario circle --duration 120
-
 """
 from __future__ import annotations
 
@@ -27,38 +25,41 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 from scipy.spatial.transform import Rotation as R
 from scipy.linalg import expm
 
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-# 1. GLOBAL CONFIGURATION
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+# ════════════════════════════════════════════════════════════════════════
+#  ESKF 工具函数
+# ════════════════════════════════════════════════════════════════════════
 
-def skew(v: np.ndarray) -> np.ndarray:
+
+def skew(v: np.ndarray):
     """Return the 3×3 cross-product matrix of a vector."""
     x, y, z = v
     return np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
 
 
-def small_quaternion(dtheta: np.ndarray) -> np.ndarray:
+def small_quaternion(dtheta: np.ndarray):
     """Convert a small rotation vector to a quaternion (x, y, z, w)."""
     half = 0.5 * dtheta
     w = 1.0 - 0.5 * half.dot(half)
     return np.hstack((half, w))
 
 
-def quat_mul(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
+def quat_mul(q1: np.ndarray, q2: np.ndarray) :
     """Quaternion multiplication (x, y, z, w convention)."""
     return (R.from_quat(q1) * R.from_quat(q2)).as_quat()
 
 
-def quat_to_rot(q: np.ndarray) -> np.ndarray:
+def quat_to_rot(q: np.ndarray):
     return R.from_quat(q).as_matrix()
 
 
+# ════════════════════════════════════════════════════════════════════════
+# 1. 全局设置
+# ════════════════════════════════════════════════════════════════════════
 class ScenarioType(Enum):
     CIRCLE = auto()
     FIGURE_EIGHT = auto()
     CUSTOM = auto()
     SPIRAL = auto()
-
 
 @dataclass
 class GlobalConfig:
@@ -74,7 +75,7 @@ class GlobalConfig:
     # Process model
     tau_bg: float = 3600.0        # gyro-bias correlation time (s)
     tau_ba: float = 3600.0        # acc-bias correlation time (s)
-    g_n: np.ndarray = field(default_factory=lambda: np.array([0., 0., -9.81]))
+    g_n: np.ndarray = field(default_factory=lambda: np.array([0., 0., -9.81]))  # m/s²
     # Earth params
     use_earth_rotation: bool = True
     omega_ie: float = 7.292115e-5  # rad/s
@@ -93,16 +94,16 @@ CFG = GlobalConfig()
 STATE_SIZE = 16 if CFG.use_scale else 15
 
 
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-# 2. SCENARIO GENERATOR
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+# ════════════════════════════════════════════════════════════════════════
+# 2. 运动轨迹
+# ════════════════════════════════════════════════════════════════════════
 class Scenario:
     """Generate true motion for different test cases."""
 
     def __init__(self, scenario: ScenarioType):
         self.scenario = scenario
 
-    def true_motion(self, t: float) -> Tuple[np.ndarray, np.ndarray]:
+    def true_motion(self, t: float):
         if self.scenario is ScenarioType.CIRCLE:
             omega_b = np.array([0.0, 0.0, 0.02])
             a_n = np.array([0.1 * np.cos(0.05 * t), 0.1 * np.sin(0.05 * t), 0.0])
@@ -128,14 +129,13 @@ class Scenario:
         return omega_b, a_n
 
 
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-# 3. SENSOR SIMULATOR
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+# ════════════════════════════════════════════════════════════════════════
+# 3. 传感器数据模拟
+# ════════════════════════════════════════════════════════════════════════
 @dataclass
 class SensorBiases:
     gyro: np.ndarray
     acc: np.ndarray
-
 
 class SensorSimulator:
     """Generate noisy IMU and GPS measurements given true motion."""
@@ -146,34 +146,34 @@ class SensorSimulator:
             acc=np.array([0.10, -0.10, 0.05]),
         )
 
-    def imu_measurement(self, omega_b: np.ndarray, a_b: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def imu_measurement(self, omega_b: np.ndarray, a_b: np.ndarray):
         gyro_m = omega_b + self.bias.gyro + CFG.sigma_gyro * np.random.randn(3)
         acc_m = a_b + self.bias.acc + CFG.sigma_acc * np.random.randn(3)
         return gyro_m, acc_m
 
-    def gps_measurement(self, p_true: np.ndarray) -> np.ndarray:
+    def gps_measurement(self, p_true: np.ndarray) :
         return p_true + CFG.sigma_gps * np.random.randn(3)
 
 
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-# 4. ERROR-STATE KALMAN FILTER
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+# ════════════════════════════════════════════════════════════════════════
+# 4. 扩展卡尔曼滤波器 (ESKF)
+# ════════════════════════════════════════════════════════════════════════
 class ESKF:
     """16-state ESKF with optional lever-arm and scale-factor."""
 
     def __init__(self):
         # Nominal state
-        self.p = np.zeros(3)
-        self.v = np.zeros(3)
-        self.q = np.array([0, 0, 0, 1])  # (x, y, z, w)
-        self.bg = np.zeros(3)
-        self.ba = np.zeros(3)
-        self.s = 1.0 if CFG.use_scale else 0.0
+        self.p = np.zeros(3)    # 位置
+        self.v = np.zeros(3)    # 速度
+        self.q = np.array([0, 0, 0, 1])  # 姿态四元数(x, y, z, w)
+        self.bg = np.zeros(3)   # 陀螺仪偏执
+        self.ba = np.zeros(3)   # 加速度计偏执
+        self.s = 1.0 if CFG.use_scale else 0.0  # 刻度因子
         # Error covariance
-        self.P = np.eye(STATE_SIZE) * 1e-3
+        self.P = np.eye(STATE_SIZE) * 1e-3 # 误差协方差矩阵
         # Pre-compute static noise matrices
-        self.Qd = self._make_Qd()
-        self.R_gps = np.eye(3) * CFG.sigma_gps ** 2
+        self.Qd = self._make_Qd()   # 过程噪声协方差矩阵
+        self.R_gps = np.eye(3) * CFG.sigma_gps ** 2 # GPS 观测噪声协方差矩阵
 
     # ---- Core public API ----
     def predict(self, gyro_m: np.ndarray, acc_m: np.ndarray):
@@ -195,8 +195,8 @@ class ESKF:
         I_KH = np.eye(STATE_SIZE) - K @ H
         self.P = I_KH @ self.P @ I_KH.T + K @ self.R_gps @ K.T
 
-    # ---- Internal helpers ----
-    def _make_Qd(self) -> np.ndarray:
+    # ---- 内部函数 ----
+    def _make_Qd(self):
         dt = CFG.dt
         sig_p = (CFG.sigma_acc * dt ** 2 / 2) ** 2
         diag = (
@@ -212,10 +212,10 @@ class ESKF:
 
     def _nominal_rk2(self, gyro_m: np.ndarray, acc_m: np.ndarray):
         dt = CFG.dt
-        # Remove bias and scale
+        # 移除偏置和刻度因子
         omega = gyro_m - self.bg
         acc_b = (acc_m - self.ba) * (self.s if CFG.use_scale else 1.0)
-        # First evaluation
+        # 第一步预测
         Rnb = quat_to_rot(self.q)
         acc_n1 = Rnb @ acc_b + CFG.g_n
         if CFG.use_earth_rotation:
@@ -223,11 +223,11 @@ class ESKF:
         v_half = self.v + 0.5 * acc_n1 * dt
         p_half = self.p + 0.5 * self.v * dt
         q_half = quat_mul(self.q, small_quaternion(omega * dt * 0.5))
-        # Second evaluation
+        # 第二步预测
         acc_n2 = quat_to_rot(q_half) @ acc_b + CFG.g_n
         if CFG.use_earth_rotation:
             acc_n2 += 2 * np.cross([0, 0, CFG.omega_ie], v_half)
-        # Integrate
+        # 更新状态
         self.v += acc_n2 * dt
         self.p += v_half * dt
         self.q = quat_mul(self.q, small_quaternion(omega * dt))
@@ -262,9 +262,9 @@ class ESKF:
             self.s += dx[15]
 
 
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-# 5. VISUALIZATION
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+# ════════════════════════════════════════════════════════════════════════
+# 5. 可视化
+# ════════════════════════════════════════════════════════════════════════
 class Visualizer:
     def __init__(self):
         self.fig = plt.figure(figsize=(10, 5))
@@ -305,9 +305,9 @@ class Visualizer:
         plt.show()
 
 
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-# 6. MAIN EXECUTION PIPELINE
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+# ════════════════════════════════════════════════════════════════════════
+# 6. 主程序
+# ════════════════════════════════════════════════════════════════════════
 
 def run_simulation(scenario_type: ScenarioType):
     scenario = Scenario(scenario_type)
@@ -359,9 +359,9 @@ def run_simulation(scenario_type: ScenarioType):
     viz.show()
 
 
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-# 7. COMMAND-LINE INTERFACE
-# ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+# ════════════════════════════════════════════════════════════════════════
+# 7. CLI 入口
+# ════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="INS/GNSS ESKF demo")
     parser.add_argument(
