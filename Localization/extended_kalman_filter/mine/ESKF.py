@@ -321,7 +321,8 @@ def run_simulation(scenario_type: ScenarioType):
     true_v = np.zeros((steps, 3))
     est_v = np.zeros((steps, 3))
     gps_log: List[np.ndarray] = []
-    # True state for motion propagation
+    # 初始状态
+    # 位置、速度、姿态四元数
     p_t = np.zeros(3)
     v_t = np.zeros(3)
     q_t = np.array([0, 0, 0, 1])
